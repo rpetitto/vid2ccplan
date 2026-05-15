@@ -1,0 +1,35 @@
+{
+  "name": "vid2ccplan",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "fling dev",
+    "start": "fling dev",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.96.0",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
+    "clsx": "^2.1.1",
+    "flingit": "^0.0.67",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.15.1",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.4",
+    "tailwindcss": "^4",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.1"
+  },
+  "fling": {
+    "projectName": "wp5f3w"
+  }
+}
