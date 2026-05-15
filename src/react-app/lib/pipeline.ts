@@ -3,19 +3,49 @@ import { fetchFile, toBlobURL } from "@ffmpeg/util";
 import { parseTranscriptFile, pickFrameTimestamps, type ParsedSegment } from "./srt";
 import { getSignedUpload, putToSignedUrl, createRun } from "./api";
 
-const CORE_BASE = "https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd";
+const CORE_VERSION = "0.12.9";
+// Vite builds the ffmpeg worker as a module worker, so we need the ESM build
+// of ffmpeg-core (the UMD build relies on importScripts, unavailable in module workers).
+const CORE_BASES = [
+  `https://cdn.jsdelivr.net/npm/@ffmpeg/core@${CORE_VERSION}/dist/esm`,
+  `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/esm`,
+];
 
 let _ffmpeg: FFmpeg | null = null;
 let _loaded = false;
+
+async function fetchBlobUrl(paths: string[], mime: string): Promise<string> {
+  let lastErr: unknown;
+  for (const url of paths) {
+    try {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`${url} -> ${r.status}`);
+      const blob = await r.blob();
+      return URL.createObjectURL(new Blob([blob], { type: mime }));
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw new Error(`Failed to fetch from any CDN. Last error: ${String(lastErr)}`);
+}
 
 async function getFfmpeg(onLog?: (line: string) => void): Promise<FFmpeg> {
   if (_ffmpeg && _loaded) return _ffmpeg;
   const ff = new FFmpeg();
   if (onLog) ff.on("log", ({ message }) => onLog(message));
-  await ff.load({
-    coreURL: await toBlobURL(`${CORE_BASE}/ffmpeg-core.js`, "text/javascript"),
-    wasmURL: await toBlobURL(`${CORE_BASE}/ffmpeg-core.wasm`, "application/wasm"),
-  });
+  const coreURL = await fetchBlobUrl(
+    CORE_BASES.map((b) => `${b}/ffmpeg-core.js`),
+    "text/javascript"
+  );
+  const wasmURL = await fetchBlobUrl(
+    CORE_BASES.map((b) => `${b}/ffmpeg-core.wasm`),
+    "application/wasm"
+  );
+  try {
+    await ff.load({ coreURL, wasmURL });
+  } catch (e) {
+    throw new Error(`ffmpeg.load() failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
   _ffmpeg = ff;
   _loaded = true;
   return ff;
