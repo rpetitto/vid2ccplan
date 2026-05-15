@@ -1,14 +1,54 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { secrets } from "flingit";
-
-let _client: Anthropic | null = null;
-function client(): Anthropic {
-  if (!_client) _client = new Anthropic({ apiKey: secrets.get("ANTHROPIC_API_KEY") });
-  return _client;
-}
 
 const VISION_MODEL = "claude-sonnet-4-6";
 const SYNTH_MODEL = "claude-opus-4-7";
+const ANTHROPIC_VERSION = "2023-06-01";
+
+interface TextBlock { type: "text"; text: string }
+interface ImageBlock {
+  type: "image";
+  source: { type: "base64"; media_type: string; data: string };
+}
+interface SystemBlock {
+  type: "text";
+  text: string;
+  cache_control?: { type: "ephemeral" };
+}
+type ContentBlock = TextBlock | ImageBlock;
+
+interface MessagesResponse {
+  content: Array<{ type: string; text?: string }>;
+  stop_reason?: string;
+  usage?: { input_tokens: number; output_tokens: number };
+}
+
+async function callMessages(body: {
+  model: string;
+  max_tokens: number;
+  system: string | SystemBlock[];
+  messages: Array<{ role: "user" | "assistant"; content: ContentBlock[] }>;
+}): Promise<string> {
+  const apiKey = secrets.get("ANTHROPIC_API_KEY");
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": ANTHROPIC_VERSION,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`Anthropic ${resp.status}: ${text.slice(0, 500)}`);
+  }
+  const data = (await resp.json()) as MessagesResponse;
+  return data.content
+    .filter((b) => b.type === "text" && typeof b.text === "string")
+    .map((b) => b.text as string)
+    .join("\n")
+    .trim();
+}
 
 const FRAME_SYSTEM = `You are a senior product designer and frontend engineer. You are looking at a single screenshot taken from a screen-recording walkthrough. Your job is to describe, with high precision, what is visible: the screen/page identity, the layout regions (header, sidebar, main, footer, panels, modals), the components present (tables, charts, forms, cards, buttons, inputs), the data shown (sample values, column names, labels), the visual style (color palette, typography, spacing, density, shape language), and any interaction implied (hover, selection, open menu, cursor position, focused field). Be concrete; reference what is actually visible. Return 4-10 short bullet points, no preamble.`;
 
@@ -20,14 +60,11 @@ export async function analyzeFrame(args: {
   fullTranscript: string;
 }): Promise<string> {
   const mt = args.mediaType.startsWith("image/") ? args.mediaType : "image/jpeg";
-  const resp = await client().messages.create({
+  return callMessages({
     model: VISION_MODEL,
     max_tokens: 800,
     system: [
-      {
-        type: "text",
-        text: FRAME_SYSTEM,
-      },
+      { type: "text", text: FRAME_SYSTEM },
       {
         type: "text",
         text: `Full walkthrough transcript (for global context):\n${args.fullTranscript || "(none)"}`,
@@ -40,11 +77,7 @@ export async function analyzeFrame(args: {
         content: [
           {
             type: "image",
-            source: {
-              type: "base64",
-              media_type: mt as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
-              data: args.imageBase64,
-            },
+            source: { type: "base64", media_type: mt, data: args.imageBase64 },
           },
           {
             type: "text",
@@ -54,7 +87,6 @@ export async function analyzeFrame(args: {
       },
     ],
   });
-  return extractText(resp);
 }
 
 const SYNTH_SYSTEM = `You are an expert product/engineering planner. You will receive (1) a narrated transcript of a screen-recording walkthrough and (2) structured visual notes describing key frames from that recording. The user wants to BUILD an application inspired by what they showed and said. Your output is a single, self-contained Markdown document named plan.md that any AI app builder (Claude Code, Base44, Glide, Replit, etc.) can consume to construct the app — without seeing the original video.
@@ -83,7 +115,7 @@ export async function synthesizePlan(args: {
   transcript: string;
   frameNotes: string;
 }): Promise<string> {
-  const resp = await client().messages.create({
+  return callMessages({
     model: SYNTH_MODEL,
     max_tokens: 8000,
     system: SYNTH_SYSTEM,
@@ -99,15 +131,6 @@ export async function synthesizePlan(args: {
       },
     ],
   });
-  return extractText(resp);
-}
-
-function extractText(resp: Anthropic.Message): string {
-  return resp.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("\n")
-    .trim();
 }
 
 function fmt(ms: number): string {
